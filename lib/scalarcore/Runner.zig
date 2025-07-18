@@ -7,6 +7,7 @@ const ThreadPool = if (builtin.single_threaded) void else xev.ThreadPool;
 const Task = if (builtin.single_threaded) void else xev.ThreadPool.Task;
 const Core = @import("Core.zig");
 const Job = @import("Job.zig");
+const LoadBalancer = @import("LoadBalancer.zig");
 const Self = @This();
 
 pub const Options = @import("Runner/Options.zig");
@@ -26,6 +27,7 @@ cores: []?*Core,
 thread_pool: ThreadPool,
 atomic_state: std.atomic.Value(u32),
 monitor_task: Task,
+load_balancer: ?*LoadBalancer,
 
 pub fn create(alloc: Allocator, options: Options) !*Self {
     const cores = try alloc.alloc(?*Core, try options.maxCores());
@@ -47,6 +49,7 @@ pub fn create(alloc: Allocator, options: Options) !*Self {
         }) else {},
         .atomic_state = .init(@intFromEnum(State.waiting)),
         .monitor_task = if (Task != void) .{ .callback = monitorCallback } else {},
+        .load_balancer = null,
     };
     return self;
 }
@@ -95,27 +98,44 @@ fn monitorCallback(task: *Task) void {
     }
 }
 
-fn findAvailableCore(self: *Self, alloc: Allocator) !?*Core {
+fn getCore(self: *Self, alloc: Allocator, i: usize) !struct { *Core, bool } {
+    const will_alloc = self.cores[i] == null;
+    if (will_alloc) {
+        const id = self.core_id.fetchAdd(1, .monotonic);
+        self.cores[i] = try .create(id, &self.job_id, alloc, self.max_jobs, self.use_affinity);
+        if (self.state() == .running and ThreadPool != void) {
+            var batch: ThreadPool.Batch = .{};
+            batch.push(.from(&self.cores[i].?.task));
+            self.thread_pool.schedule(batch);
+        }
+    }
+    return .{ self.cores[i].?, will_alloc };
+}
+
+fn findAvailableCore(self: *Self, alloc: Allocator) !?struct { *Core, bool } {
     for (self.cores) |*opt_core| {
         if (opt_core.*) |core| {
-            if (core.findFreeJob() != null) return core;
+            if (core.findFreeJob() != null) return .{ core, false };
         }
     }
 
-    for (self.cores) |*core| {
+    for (self.cores, 0..) |*core, i| {
         if (core.* == null) {
-            const id = self.core_id.fetchAdd(1, .monotonic);
-            core.* = try .create(id, &self.job_id, alloc, self.max_jobs, self.use_affinity);
-
-            if (self.state() == .running and ThreadPool != void) {
-                var batch: ThreadPool.Batch = .{};
-                batch.push(.from(&self.monitor_task));
-                self.thread_pool.schedule(batch);
-            }
-            return core.*;
+            return try self.getCore(alloc, i);
         }
     }
     return null;
+}
+
+fn findAvailableCoreFor(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !?struct { *Core, bool } {
+    if (self.load_balancer) |lb| {
+        const loc = lb.shouldPlace(self, func, userdata);
+        return switch (loc) {
+            .core => |i| try self.getCore(alloc, i),
+            .job => try self.findAvailableCore(alloc),
+        };
+    }
+    return self.findAvailableCore(alloc);
 }
 
 pub fn state(self: *Self) State {
@@ -130,9 +150,19 @@ pub fn wait(self: *Self, timeout: ?u64) error{Timeout}!void {
     }
 }
 
-pub fn pushJob(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !void {
-    if (try self.findAvailableCore(alloc)) |core| {
-        return try core.pushJob(func, userdata);
+pub fn pushJob(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !*?Job {
+    if (try self.findAvailableCoreFor(alloc, func, userdata)) |result| {
+        const core, const did_alloc = result;
+
+        const job = try core.pushJob(func, userdata);
+        if (self.load_balancer) |lb| {
+            try lb.markPlacement(func, userdata, core.id, job.*.?.id, if (did_alloc) .core else .job);
+            job.*.?.load_balancer = .{
+                .lb = lb,
+                .core_id = core.id,
+            };
+        }
+        return job;
     }
     // TODO: push this to a queue
     return error.OutOfCores;
@@ -194,10 +224,10 @@ test "Sync" {
     defer runner.deinit(alloc);
 
     var did_run: bool = false;
-    try runner.pushJob(alloc, testWorker, &did_run);
+    _ = try runner.pushJob(alloc, testWorker, &did_run);
 
     var did_run2: bool = false;
-    try runner.pushJob(alloc, testWorker, &did_run2);
+    _ = try runner.pushJob(alloc, testWorker, &did_run2);
 
     try runner.runSync(null);
 

@@ -151,7 +151,7 @@ pub fn findFreeJob(self: *Self) ?*?Job {
     return null;
 }
 
-pub fn pushJob(self: *Self, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !void {
+pub fn pushJob(self: *Self, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !*?Job {
     if (self.findFreeJob()) |opt_job| {
         const id = self.job_id.fetchAdd(1, .monotonic);
         if (opt_job.* == null) {
@@ -161,7 +161,7 @@ pub fn pushJob(self: *Self, func: *const Job.WorkerFunc, userdata: ?*anyopaque) 
         }
 
         Job.queue(&opt_job.*.?, &self.loop);
-        return;
+        return opt_job;
     }
     return error.OutOfJobs;
 }
@@ -233,12 +233,12 @@ test "Standalone usage" {
     try std.testing.expectEqual(&core.jobs[0], core.findFreeJob());
 
     var did_run: bool = false;
-    try core.pushJob(testWorker, &did_run);
+    _ = try core.pushJob(testWorker, &did_run);
 
     try std.testing.expectEqual(&core.jobs[1], core.findFreeJob());
 
     var did_run2: bool = false;
-    try core.pushJob(testWorker, &did_run2);
+    _ = try core.pushJob(testWorker, &did_run2);
 
     try std.testing.expectEqual(@as(?*?Job, null), core.findFreeJob());
 
@@ -259,7 +259,7 @@ test "Error handling" {
 
     try std.testing.expectEqual(&core.jobs[0], core.findFreeJob());
 
-    try core.pushJob(testError, null);
+    _ = try core.pushJob(testError, null);
 
     try std.testing.expectError(error.Unexpected, core.run());
     try core.wait(null);

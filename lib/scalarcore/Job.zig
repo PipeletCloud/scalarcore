@@ -2,7 +2,17 @@ const std = @import("std");
 const xev = @import("xev");
 const closure = @import("closure");
 const Allocator = std.mem.Allocator;
+const LoadBalancer = @import("LoadBalancer.zig");
 const Self = @This();
+
+pub const LoadBalancerState = struct {
+    lb: *LoadBalancer,
+    core_id: usize,
+
+    pub fn commit(self: *const LoadBalancerState, job_id: usize) !void {
+        return self.lb.unmarkPlacement(self.core_id, job_id);
+    }
+};
 
 pub const Error = struct {
     id: std.meta.Int(.unsigned, @bitSizeOf(anyerror)),
@@ -40,6 +50,7 @@ completion: xev.Completion,
 worker: closure.ImplClosure(WorkerFunc),
 atomic_state: std.atomic.Value(u32),
 err: ?Error,
+load_balancer: ?LoadBalancerState,
 
 pub fn init(self: *?Self, id: usize, func: *const WorkerFunc, userdata: ?*anyopaque) !void {
     const x_async = try xev.Async.init();
@@ -55,6 +66,7 @@ pub fn init(self: *?Self, id: usize, func: *const WorkerFunc, userdata: ?*anyopa
         },
         .atomic_state = .init(@intFromEnum(State.waiting)),
         .err = null,
+        .load_balancer = null,
     };
 }
 
@@ -93,6 +105,7 @@ fn waitCallback(self_: ?*Self, _: *xev.Loop, _: *xev.Completion, r: xev.Async.Wa
     _ = r catch |err| {
         self.err = .init(err, @errorReturnTrace());
         self.atomic_state.store(@intFromEnum(State.failed), .monotonic);
+        if (self.load_balancer) |lb| lb.commit(self.id) catch unreachable;
         return .rearm;
     };
 
@@ -100,10 +113,12 @@ fn waitCallback(self_: ?*Self, _: *xev.Loop, _: *xev.Completion, r: xev.Async.Wa
     self.worker.run() catch |err| {
         self.err = .init(err, @errorReturnTrace());
         self.atomic_state.store(@intFromEnum(State.failed), .monotonic);
+        if (self.load_balancer) |lb| lb.commit(self.id) catch unreachable;
         return .disarm;
     };
 
     self.atomic_state.store(@intFromEnum(State.done), .monotonic);
+    if (self.load_balancer) |lb| lb.commit(self.id) catch unreachable;
     return .disarm;
 }
 
