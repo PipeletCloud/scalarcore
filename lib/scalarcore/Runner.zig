@@ -146,7 +146,10 @@ pub fn wait(self: *Self, timeout: ?u64) error{Timeout}!void {
     if (timeout) |t| {
         try std.Thread.Futex.timedWait(&self.atomic_state, @intFromEnum(State.running), t);
     } else {
-        std.Thread.Futex.wait(&self.atomic_state, @intFromEnum(State.running));
+        // NOTE: std.Thread.Futex.wait was used but gets stuck
+        while (true) {
+            if (self.state() != .running) break;
+        }
     }
 }
 
