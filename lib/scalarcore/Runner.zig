@@ -202,12 +202,13 @@ pub fn runSync(self: *Self, timeout: ?u64) !void {
     if (ThreadPool != void) try self.wait(timeout);
 }
 
-fn testWorker(userdata: ?*anyopaque) anyerror!void {
+fn testWorker(userdata: ?*anyopaque) anyerror!bool {
     const bool_ptr: *bool = @ptrCast(@alignCast(userdata.?));
     bool_ptr.* = true;
+    return false;
 }
 
-fn testError(_: ?*anyopaque) anyerror!void {
+fn testError(_: ?*anyopaque) anyerror!bool {
     return error.Unexpected;
 }
 

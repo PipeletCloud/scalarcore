@@ -42,7 +42,7 @@ pub const State = enum {
     done,
 };
 
-pub const WorkerFunc = fn (?*anyopaque) anyerror!void;
+pub const WorkerFunc = fn (?*anyopaque) anyerror!bool;
 
 id: usize,
 x_async: xev.Async,
@@ -110,7 +110,7 @@ fn waitCallback(self_: ?*Self, _: *xev.Loop, _: *xev.Completion, r: xev.Async.Wa
     };
 
     self.err = null;
-    self.worker.run() catch |err| {
+    const should_continue = self.worker.run() catch |err| {
         self.err = .init(err, @errorReturnTrace());
         self.atomic_state.store(@intFromEnum(State.failed), .monotonic);
         if (self.load_balancer) |lb| lb.commit(self.id) catch unreachable;
@@ -119,7 +119,7 @@ fn waitCallback(self_: ?*Self, _: *xev.Loop, _: *xev.Completion, r: xev.Async.Wa
 
     self.atomic_state.store(@intFromEnum(State.done), .monotonic);
     if (self.load_balancer) |lb| lb.commit(self.id) catch unreachable;
-    return .disarm;
+    return if (should_continue) .rearm else .disarm;
 }
 
 test {
