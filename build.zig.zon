@@ -1,0 +1,21 @@
+.{
+    .name = .scalarcore,
+    .version = "0.0.0",
+    .fingerprint = 0xc13e583b78c6246f, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.0-dev.1084+dbe0e0c1b",
+    .dependencies = .{
+        .libxev = .{
+            .url = "https://github.com/mitchellh/libxev/archive/9f785d202ddccf7a625e799250579253977978b6.tar.gz",
+            .hash = "libxev-0.0.0-86vtcx8dEwDfl6p4tGVxCygft8oOsggfba9JO-k28J2x",
+        },
+        .closure = .{
+            .url = "https://github.com/PipeletCloud/zig-closure/archive/53c464672822507d5607ec4038b54a850609ce81.tar.gz",
+            .hash = "zig_closure-0.0.0-H14lFLARAABqJQ_2SRR7MQAdGd39j4ImFxsxWpCScY1S",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "lib",
+    },
+}
