@@ -112,7 +112,7 @@ fn getCore(self: *Self, alloc: Allocator, i: usize) !struct { *Core, bool } {
     return .{ self.cores[i].?, will_alloc };
 }
 
-fn findAvailableCore(self: *Self, alloc: Allocator) !?struct { *Core, bool } {
+pub fn findAvailableCore(self: *Self, alloc: Allocator) !?struct { *Core, bool } {
     for (self.cores) |*opt_core| {
         if (opt_core.*) |core| {
             if (core.findFreeJob() != null) return .{ core, false };
@@ -127,7 +127,7 @@ fn findAvailableCore(self: *Self, alloc: Allocator) !?struct { *Core, bool } {
     return null;
 }
 
-fn findAvailableCoreFor(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !?struct { *Core, bool } {
+pub fn findAvailableCoreFor(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !?struct { *Core, bool } {
     if (self.load_balancer) |lb| {
         const loc = lb.shouldPlace(self, func, userdata);
         return switch (loc) {
