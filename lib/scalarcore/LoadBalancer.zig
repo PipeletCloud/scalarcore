@@ -15,7 +15,7 @@ pub const PlacementLocation = union(Placement) {
 };
 
 pub const VTable = struct {
-    shouldPlace: *const fn (?*anyopaque, *Runner, *const Job.WorkerFunc, ?*anyopaque) PlacementLocation,
+    shouldPlace: *const fn (?*anyopaque, *Runner, *const Job.WorkerFunc, ?*anyopaque, ?Placement) PlacementLocation,
     markPlacement: *const fn (?*anyopaque, *const Job.WorkerFunc, ?*anyopaque, usize, usize, Placement) anyerror!void,
     unmarkPlacement: *const fn (?*anyopaque, usize, usize) anyerror!void,
     deinit: ?*const fn (?*anyopaque, Allocator) void = null,
@@ -24,8 +24,8 @@ pub const VTable = struct {
 vtable: *const VTable,
 ptr: ?*anyopaque,
 
-pub fn shouldPlace(self: *Self, runner: *Runner, func: *const Job.WorkerFunc, userdata: ?*anyopaque) PlacementLocation {
-    return self.vtable.shouldPlace(self.ptr, runner, func, userdata);
+pub fn shouldPlace(self: *Self, runner: *Runner, func: *const Job.WorkerFunc, userdata: ?*anyopaque, placementPreference: ?Placement) PlacementLocation {
+    return self.vtable.shouldPlace(self.ptr, runner, func, userdata, placementPreference);
 }
 
 pub fn markPlacement(self: *Self, func: *const Job.WorkerFunc, userdata: ?*anyopaque, core_id: usize, job_id: usize, method: Placement) anyerror!void {

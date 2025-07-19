@@ -127,15 +127,26 @@ pub fn findAvailableCore(self: *Self, alloc: Allocator) !?struct { *Core, bool }
     return null;
 }
 
-pub fn findAvailableCoreFor(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !?struct { *Core, bool } {
+pub fn findAvailableCoreFor(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque, placementPreference: ?LoadBalancer.Placement) !?struct { *Core, bool } {
     if (self.load_balancer) |lb| {
-        const loc = lb.shouldPlace(self, func, userdata);
+        const loc = lb.shouldPlace(self, func, userdata, placementPreference);
         return switch (loc) {
             .core => |i| try self.getCore(alloc, i),
             .job => try self.findAvailableCore(alloc),
         };
     }
-    return self.findAvailableCore(alloc);
+
+    return switch (placementPreference orelse .job) {
+        .core => blk: {
+            for (self.cores, 0..) |*core, i| {
+                if (core.* == null) {
+                    break :blk try self.getCore(alloc, i);
+                }
+            }
+            break :blk null;
+        },
+        .job => self.findAvailableCore(alloc),
+    };
 }
 
 pub fn state(self: *Self) State {
@@ -153,8 +164,8 @@ pub fn wait(self: *Self, timeout: ?u64) error{Timeout}!void {
     }
 }
 
-pub fn pushJob(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque) !*?Job {
-    if (try self.findAvailableCoreFor(alloc, func, userdata)) |result| {
+pub fn pushJob(self: *Self, alloc: Allocator, func: *const Job.WorkerFunc, userdata: ?*anyopaque, placementPreference: ?LoadBalancer.Placement) !*?Job {
+    if (try self.findAvailableCoreFor(alloc, func, userdata, placementPreference)) |result| {
         const core, const did_alloc = result;
 
         const job = try core.pushJob(func, userdata);
@@ -228,10 +239,10 @@ test "Sync" {
     defer runner.deinit(alloc);
 
     var did_run: bool = false;
-    _ = try runner.pushJob(alloc, testWorker, &did_run);
+    _ = try runner.pushJob(alloc, testWorker, &did_run, null);
 
     var did_run2: bool = false;
-    _ = try runner.pushJob(alloc, testWorker, &did_run2);
+    _ = try runner.pushJob(alloc, testWorker, &did_run2, null);
 
     try runner.runSync(null);
 
